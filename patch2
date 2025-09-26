@@ -105,7 +105,7 @@ auto_fix_build_errors() {
     # 2.c) Tüm FQCN'leri kısa ada normalize et
     sed -i 's|crate::nexus_orchestrator::TaskDifficulty::ExtraLarge\([2345]\)|TaskDifficulty::ExtraLarge\1|g' "${FETCHER}" || true
 
-    # 2.d) ExtraLarge2 kolunu 3/4/5 ile genişlet (henüz eklenmediyse)
+    # 2.d) ExtraLarge2 kolunu 3/4/5 ile genişlet (eğer henüz eklenmemişse)
     if grep -q "TaskDifficulty::ExtraLarge2" "${FETCHER}" && ! grep -q "TaskDifficulty::ExtraLarge3" "${FETCHER}"; then
       sed -i '0,/TaskDifficulty::ExtraLarge2/s/TaskDifficulty::ExtraLarge2/TaskDifficulty::ExtraLarge2 | TaskDifficulty::ExtraLarge3 | TaskDifficulty::ExtraLarge4 | TaskDifficulty::ExtraLarge5/' "${FETCHER}" || true
       echo "[patch2] fetcher.rs: ExtraLarge2 kolu 3/4/5 ile genişletildi."
