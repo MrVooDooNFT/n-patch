@@ -24,7 +24,7 @@ stop_running() {
         break
       fi
     done
-    if pgrep -f "nexus-network" >/devnull 2>&1; then
+    if pgrep -f "nexus-network" >/dev/null 2>&1; then
       echo "[patch2] Hâlâ çalışıyor, SIGKILL gönderiliyor..."
       pkill -9 -f "nexus-network" || true
     fi
@@ -39,7 +39,6 @@ overlay_files() {
 
   chmod -R u+rwX "${SRC_OFF}"
 
-  # Editli dosya listesi — ihtiyaç oldukça güncelle
   FILES=(
     "clients/cli/src/workers/core.rs"
     "clients/cli/src/main.rs"
@@ -51,7 +50,6 @@ overlay_files() {
     "clients/cli/src/network/request_timer.rs"
     "clients/cli/src/workers/fetcher.rs"
     "clients/cli/src/workers/submitter.rs"
-    # Resmî repoda olup editlide olmayabilir; auto-fix için yine de hedefte tutuyoruz:
     "clients/cli/src/prover/handlers.rs"
   )
 
@@ -86,13 +84,19 @@ auto_fix_build_errors() {
     fi
   fi
 
-  # 2) fetcher.rs: TaskDifficulty => ExtraLarge3/4/5 desteği (ExtraLarge2 kolunu genişlet)
+  # 2) fetcher.rs: TaskDifficulty => ExtraLarge3/4/5 desteği
   FETCHER="${SRC_OFF}/clients/cli/src/workers/fetcher.rs"
   if [ -f "${FETCHER}" ]; then
     dos2unix "${FETCHER}" >/dev/null 2>&1 || true
-    if grep -q "TaskDifficulty::ExtraLarge2" "${FETCHER}" && ! grep -q "ExtraLarge3" "${FETCHER}"; then
-      sed -i '0,/TaskDifficulty::ExtraLarge2/s/TaskDifficulty::ExtraLarge2/TaskDifficulty::ExtraLarge2 | TaskDifficulty::ExtraLarge3 | TaskDifficulty::ExtraLarge4 | TaskDifficulty::ExtraLarge5/' "${FETCHER}" || true
-      echo "[patch2] fetcher.rs: ExtraLarge3/4/5 -> ExtraLarge2 koluna eklendi."
+
+    # Vaka A: Kısa ad kullanılmışsa -> hepsini FQCN yap
+    if grep -q "TaskDifficulty::ExtraLarge2" "${FETCHER}"; then
+      sed -i '0,/TaskDifficulty::ExtraLarge2/s|TaskDifficulty::ExtraLarge2|crate::nexus_orchestrator::TaskDifficulty::ExtraLarge2 \| crate::nexus_orchestrator::TaskDifficulty::ExtraLarge3 \| crate::nexus_orchestrator::TaskDifficulty::ExtraLarge4 \| crate::nexus_orchestrator::TaskDifficulty::ExtraLarge5|' "${FETCHER}" || true
+      echo "[patch2] fetcher.rs: ExtraLarge2 → 2/3/4/5 (tam nitelikli) olarak genişletildi."
+    # Vaka B: Zaten FQCN ise -> yalnızca 3/4/5 ekle
+    elif grep -q "crate::nexus_orchestrator::TaskDifficulty::ExtraLarge2" "${FETCHER}" && ! grep -q "ExtraLarge3" "${FETCHER}"; then
+      sed -i '0,/crate::nexus_orchestrator::TaskDifficulty::ExtraLarge2/s|crate::nexus_orchestrator::TaskDifficulty::ExtraLarge2|crate::nexus_orchestrator::TaskDifficulty::ExtraLarge2 \| crate::nexus_orchestrator::TaskDifficulty::ExtraLarge3 \| crate::nexus_orchestrator::TaskDifficulty::ExtraLarge4 \| crate::nexus_orchestrator::TaskDifficulty::ExtraLarge5|' "${FETCHER}" || true
+      echo "[patch2] fetcher.rs: FQCN ExtraLarge3/4/5 eklendi."
     fi
   fi
 }
