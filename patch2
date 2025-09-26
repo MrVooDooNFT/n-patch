@@ -24,7 +24,7 @@ stop_running() {
         break
       fi
     done
-    if pgrep -f "nexus-network" >/dev/null 2>&1; then
+    if pgrep -f "nexus-network" >/devnull 2>&1; then
       echo "[patch2] Hâlâ çalışıyor, SIGKILL gönderiliyor..."
       pkill -9 -f "nexus-network" || true
     fi
@@ -36,6 +36,7 @@ overlay_files() {
   echo "[patch2] Klasör kontrolü..."
   [ -d "${SRC_OFF}" ] || { echo "Resmî repo yok: ${SRC_OFF}"; exit 1; }
   [ -d "${SRC_EDT}" ] || { echo "Editli repo yok: ${SRC_EDT}"; exit 1; }
+
   chmod -R u+rwX "${SRC_OFF}"
 
   # Editli dosya listesi — ihtiyaç oldukça güncelle
@@ -50,7 +51,7 @@ overlay_files() {
     "clients/cli/src/network/request_timer.rs"
     "clients/cli/src/workers/fetcher.rs"
     "clients/cli/src/workers/submitter.rs"
-    # aşağıdakiler resmi repo path’leri (editli repoda yoksa otomatik atlanır)
+    # Resmî repoda olup editlide olmayabilir; auto-fix için yine de hedefte tutuyoruz:
     "clients/cli/src/prover/handlers.rs"
   )
 
@@ -69,35 +70,29 @@ overlay_files() {
 auto_fix_build_errors() {
   echo "[patch2] Otomatik düzeltmeler (gerekirse) uygulanacak..."
 
-  # 1) handlers.rs: authenticated_proving(...) -> 4. parametre ve çağrı
+  # 1) handlers.rs: authenticated_proving(...) => 4. parametre ve çağrı
   HANDLERS="${SRC_OFF}/clients/cli/src/prover/handlers.rs"
   if [ -f "${HANDLERS}" ]; then
     dos2unix "${HANDLERS}" >/dev/null 2>&1 || true
 
-    # Çağrı satırına , per_task_threads ekle (tek satır beklentisi; çoğu sürümde böyle)
+    # ProvingPipeline çağrısına , per_task_threads ekle (eğer yoksa)
     if grep -q "ProvingPipeline::prove_authenticated(" "${HANDLERS}" && ! grep -q "per_task_threads" "${HANDLERS}"; then
       sed -i 's/ProvingPipeline::prove_authenticated(\(.*\))/ProvingPipeline::prove_authenticated(\1, per_task_threads)/' "${HANDLERS}" || true
     fi
 
-    # İmzadaki parametre listesine per_task_threads ekle (client_id paramından sonra)
+    # Fonksiyon imzasına per_task_threads ekle (client_id sonrasına)
     if grep -q "pub async fn authenticated_proving" "${HANDLERS}" && ! grep -q "per_task_threads" "${HANDLERS}"; then
       sed -i '0,/client_id[[:space:]]*:[^,)]*/s//&,\n    per_task_threads: usize/' "${HANDLERS}" || true
     fi
   fi
 
-  # 2) fetcher.rs: TaskDifficulty için catch-all kol ekle
+  # 2) fetcher.rs: TaskDifficulty => ExtraLarge3/4/5 desteği (ExtraLarge2 kolunu genişlet)
   FETCHER="${SRC_OFF}/clients/cli/src/workers/fetcher.rs"
   if [ -f "${FETCHER}" ]; then
     dos2unix "${FETCHER}" >/dev/null 2>&1 || true
-    if grep -q "match current" "${FETCHER}" && ! grep -q "_ => current" "${FETCHER}"; then
-      # 'match current {' satırını bul ve blok kapanmadan hemen önce bir wildcard kolu ekle
-      awk '
-        /match[[:space:]]+current[[:space:]]*\{/ {inmatch=1}
-        {print}
-        inmatch && /^\}/ {
-          print "        _ => current,"; inmatch=0
-        }
-      ' "${FETCHER}" > "${FETCHER}.tmp" && mv "${FETCHER}.tmp" "${FETCHER}"
+    if grep -q "TaskDifficulty::ExtraLarge2" "${FETCHER}" && ! grep -q "ExtraLarge3" "${FETCHER}"; then
+      sed -i '0,/TaskDifficulty::ExtraLarge2/s/TaskDifficulty::ExtraLarge2/TaskDifficulty::ExtraLarge2 | TaskDifficulty::ExtraLarge3 | TaskDifficulty::ExtraLarge4 | TaskDifficulty::ExtraLarge5/' "${FETCHER}" || true
+      echo "[patch2] fetcher.rs: ExtraLarge3/4/5 -> ExtraLarge2 koluna eklendi."
     fi
   fi
 }
@@ -112,399 +107,7 @@ build_all() {
     echo "[patch2] Yeniden derleniyor..."
     cargo build --release
   fi
-  echo
-  echo "[patch2] Tamamdır. Binary:"
-  echo "  ${SRC_OFF}/clients/cli/target/release/nexus-network"
-  echo
-  echo "[patch2] TUI başlatma örneği:"
-  echo "  ${SRC_OFF}/clients/cli/target/release/nexus-network start \\"
-  echo "    --node-id 36116773 \\"
-  echo "    --max-difficulty extra_large_5"
-}
 
-main() {
-  stop_running
-  overlay_files
-  build_all
-}
-
-main "$@"
-#!/usr/bin/env bash
-set -euo pipefail
-
-WORKDIR="${PWD}/nexus-build"
-SRC_OFF="${WORKDIR}/nexus-cli"
-SRC_EDT="${WORKDIR}/nexus-edited"
-
-stop_running() {
-  echo "[patch2] Çalışan nexus-network var mı kontrol ediliyor..."
-  if command -v systemctl >/dev/null 2>&1; then
-    if systemctl is-active --quiet nexus-network.service; then
-      echo "[patch2] systemd: nexus-network.service durduruluyor..."
-      sudo systemctl stop nexus-network.service || true
-      sleep 2
-    fi
-  fi
-  if pgrep -f "nexus-network" >/dev/null 2>&1; then
-    echo "[patch2] Proses: nexus-network bulunuyor, SIGTERM gönderiliyor..."
-    pkill -f "nexus-network" || true
-    for i in {1..10}; do
-      if pgrep -f "nexus-network" >/dev/null 2>&1; then
-        sleep 1
-      else
-        break
-      fi
-    done
-    if pgrep -f "nexus-network" >/dev/null 2>&1; then
-      echo "[patch2] Hâlâ çalışıyor, SIGKILL gönderiliyor..."
-      pkill -9 -f "nexus-network" || true
-    fi
-  fi
-  echo "[patch2] Node kapatma kontrolü tamam."
-}
-
-overlay_files() {
-  echo "[patch2] Klasör kontrolü..."
-  [ -d "${SRC_OFF}" ] || { echo "Resmî repo yok: ${SRC_OFF}"; exit 1; }
-  [ -d "${SRC_EDT}" ] || { echo "Editli repo yok: ${SRC_EDT}"; exit 1; }
-  chmod -R u+rwX "${SRC_OFF}"
-
-  # Editli dosya listesi — ihtiyaç oldukça güncelle
-  FILES=(
-    "clients/cli/src/workers/core.rs"
-    "clients/cli/src/main.rs"
-    "clients/cli/src/session/setup.rs"
-    "clients/cli/src/runtime.rs"
-    "clients/cli/src/workers/prover.rs"
-    "clients/cli/src/prover/pipeline.rs"
-    "clients/cli/src/workers/authenticated_worker.rs"
-    "clients/cli/src/network/request_timer.rs"
-    "clients/cli/src/workers/fetcher.rs"
-    "clients/cli/src/workers/submitter.rs"
-    # aşağıdakiler resmi repo path’leri (editli repoda yoksa otomatik atlanır)
-    "clients/cli/src/prover/handlers.rs"
-  )
-
-  echo "[patch2] Dosyalar overlay ediliyor..."
-  for f in "${FILES[@]}"; do
-    if [ -f "${SRC_EDT}/${f}" ]; then
-      mkdir -p "$(dirname "${SRC_OFF}/${f}")"
-      cp -f "${SRC_EDT}/${f}" "${SRC_OFF}/${f}"
-      echo "  + ${f}"
-    else
-      echo "  - (atlandı) ${f} editli repoda yok"
-    fi
-  done
-}
-
-auto_fix_build_errors() {
-  echo "[patch2] Otomatik düzeltmeler (gerekirse) uygulanacak..."
-
-  # 1) handlers.rs: authenticated_proving(...) -> 4. parametre ve çağrı
-  HANDLERS="${SRC_OFF}/clients/cli/src/prover/handlers.rs"
-  if [ -f "${HANDLERS}" ]; then
-    dos2unix "${HANDLERS}" >/dev/null 2>&1 || true
-
-    # Çağrı satırına , per_task_threads ekle (tek satır beklentisi; çoğu sürümde böyle)
-    if grep -q "ProvingPipeline::prove_authenticated(" "${HANDLERS}" && ! grep -q "per_task_threads" "${HANDLERS}"; then
-      sed -i 's/ProvingPipeline::prove_authenticated(\(.*\))/ProvingPipeline::prove_authenticated(\1, per_task_threads)/' "${HANDLERS}" || true
-    fi
-
-    # İmzadaki parametre listesine per_task_threads ekle (client_id paramından sonra)
-    if grep -q "pub async fn authenticated_proving" "${HANDLERS}" && ! grep -q "per_task_threads" "${HANDLERS}"; then
-      sed -i '0,/client_id[[:space:]]*:[^,)]*/s//&,\n    per_task_threads: usize/' "${HANDLERS}" || true
-    fi
-  fi
-
-  # 2) fetcher.rs: TaskDifficulty için catch-all kol ekle
-  FETCHER="${SRC_OFF}/clients/cli/src/workers/fetcher.rs"
-  if [ -f "${FETCHER}" ]; then
-    dos2unix "${FETCHER}" >/dev/null 2>&1 || true
-    if grep -q "match current" "${FETCHER}" && ! grep -q "_ => current" "${FETCHER}"; then
-      # 'match current {' satırını bul ve blok kapanmadan hemen önce bir wildcard kolu ekle
-      awk '
-        /match[[:space:]]+current[[:space:]]*\{/ {inmatch=1}
-        {print}
-        inmatch && /^\}/ {
-          print "        _ => current,"; inmatch=0
-        }
-      ' "${FETCHER}" > "${FETCHER}.tmp" && mv "${FETCHER}.tmp" "${FETCHER}"
-    fi
-  fi
-}
-
-build_all() {
-  echo "[patch2] Derleniyor..."
-  cd "${SRC_OFF}/clients/cli"
-  chmod -R u+rwX .
-  if ! cargo build --release; then
-    echo "[patch2] İlk build başarısız oldu, otomatik düzeltmeler uygulanıyor..."
-    auto_fix_build_errors
-    echo "[patch2] Yeniden derleniyor..."
-    cargo build --release
-  fi
-  echo
-  echo "[patch2] Tamamdır. Binary:"
-  echo "  ${SRC_OFF}/clients/cli/target/release/nexus-network"
-  echo
-  echo "[patch2] TUI başlatma örneği:"
-  echo "  ${SRC_OFF}/clients/cli/target/release/nexus-network start \\"
-  echo "    --node-id 36116773 \\"
-  echo "    --max-difficulty extra_large_5"
-}
-
-main() {
-  stop_running
-  overlay_files
-  build_all
-}
-
-main "$@"
-#!/usr/bin/env bash
-set -euo pipefail
-
-WORKDIR="${PWD}/nexus-build"
-SRC_OFF="${WORKDIR}/nexus-cli"
-SRC_EDT="${WORKDIR}/nexus-edited"
-
-stop_running() {
-  echo "[patch2] Çalışan nexus-network var mı kontrol ediliyor..."
-  if command -v systemctl >/dev/null 2>&1; then
-    if systemctl is-active --quiet nexus-network.service; then
-      echo "[patch2] systemd: nexus-network.service durduruluyor..."
-      sudo systemctl stop nexus-network.service || true
-      sleep 2
-    fi
-  fi
-  if pgrep -f "nexus-network" >/dev/null 2>&1; then
-    echo "[patch2] Proses: nexus-network bulunuyor, SIGTERM gönderiliyor..."
-    pkill -f "nexus-network" || true
-    for i in {1..10}; do
-      if pgrep -f "nexus-network" >/dev/null 2>&1; then
-        sleep 1
-      else
-        break
-      fi
-    done
-    if pgrep -f "nexus-network" >/dev/null 2>&1; then
-      echo "[patch2] Hâlâ çalışıyor, SIGKILL gönderiliyor..."
-      pkill -9 -f "nexus-network" || true
-    fi
-  fi
-  echo "[patch2] Node kapatma kontrolü tamam."
-}
-
-overlay_files() {
-  echo "[patch2] Klasör kontrolü..."
-  [ -d "${SRC_OFF}" ] || { echo "Resmî repo yok: ${SRC_OFF}"; exit 1; }
-  [ -d "${SRC_EDT}" ] || { echo "Editli repo yok: ${SRC_EDT}"; exit 1; }
-  chmod -R u+rwX "${SRC_OFF}"
-
-  # Editli dosya listesi — ihtiyaç oldukça güncelle
-  FILES=(
-    "clients/cli/src/workers/core.rs"
-    "clients/cli/src/main.rs"
-    "clients/cli/src/session/setup.rs"
-    "clients/cli/src/runtime.rs"
-    "clients/cli/src/workers/prover.rs"
-    "clients/cli/src/prover/pipeline.rs"
-    "clients/cli/src/workers/authenticated_worker.rs"
-    "clients/cli/src/network/request_timer.rs"
-    "clients/cli/src/workers/fetcher.rs"
-    "clients/cli/src/workers/submitter.rs"
-    # aşağıdakiler resmi repo path’leri (editli repoda yoksa otomatik atlanır)
-    "clients/cli/src/prover/handlers.rs"
-  )
-
-  echo "[patch2] Dosyalar overlay ediliyor..."
-  for f in "${FILES[@]}"; do
-    if [ -f "${SRC_EDT}/${f}" ]; then
-      mkdir -p "$(dirname "${SRC_OFF}/${f}")"
-      cp -f "${SRC_EDT}/${f}" "${SRC_OFF}/${f}"
-      echo "  + ${f}"
-    else
-      echo "  - (atlandı) ${f} editli repoda yok"
-    fi
-  done
-}
-
-auto_fix_build_errors() {
-  echo "[patch2] Otomatik düzeltmeler (gerekirse) uygulanacak..."
-
-  # 1) handlers.rs: authenticated_proving(...) -> 4. parametre ve çağrı
-  HANDLERS="${SRC_OFF}/clients/cli/src/prover/handlers.rs"
-  if [ -f "${HANDLERS}" ]; then
-    dos2unix "${HANDLERS}" >/dev/null 2>&1 || true
-
-    # Çağrı satırına , per_task_threads ekle (tek satır beklentisi; çoğu sürümde böyle)
-    if grep -q "ProvingPipeline::prove_authenticated(" "${HANDLERS}" && ! grep -q "per_task_threads" "${HANDLERS}"; then
-      sed -i 's/ProvingPipeline::prove_authenticated(\(.*\))/ProvingPipeline::prove_authenticated(\1, per_task_threads)/' "${HANDLERS}" || true
-    fi
-
-    # İmzadaki parametre listesine per_task_threads ekle (client_id paramından sonra)
-    if grep -q "pub async fn authenticated_proving" "${HANDLERS}" && ! grep -q "per_task_threads" "${HANDLERS}"; then
-      sed -i '0,/client_id[[:space:]]*:[^,)]*/s//&,\n    per_task_threads: usize/' "${HANDLERS}" || true
-    fi
-  fi
-
-  # 2) fetcher.rs: TaskDifficulty için catch-all kol ekle
-  FETCHER="${SRC_OFF}/clients/cli/src/workers/fetcher.rs"
-  if [ -f "${FETCHER}" ]; then
-    dos2unix "${FETCHER}" >/dev/null 2>&1 || true
-    if grep -q "match current" "${FETCHER}" && ! grep -q "_ => current" "${FETCHER}"; then
-      # 'match current {' satırını bul ve blok kapanmadan hemen önce bir wildcard kolu ekle
-      awk '
-        /match[[:space:]]+current[[:space:]]*\{/ {inmatch=1}
-        {print}
-        inmatch && /^\}/ {
-          print "        _ => current,"; inmatch=0
-        }
-      ' "${FETCHER}" > "${FETCHER}.tmp" && mv "${FETCHER}.tmp" "${FETCHER}"
-    fi
-  fi
-}
-
-build_all() {
-  echo "[patch2] Derleniyor..."
-  cd "${SRC_OFF}/clients/cli"
-  chmod -R u+rwX .
-  if ! cargo build --release; then
-    echo "[patch2] İlk build başarısız oldu, otomatik düzeltmeler uygulanıyor..."
-    auto_fix_build_errors
-    echo "[patch2] Yeniden derleniyor..."
-    cargo build --release
-  fi
-  echo
-  echo "[patch2] Tamamdır. Binary:"
-  echo "  ${SRC_OFF}/clients/cli/target/release/nexus-network"
-  echo
-  echo "[patch2] TUI başlatma örneği:"
-  echo "  ${SRC_OFF}/clients/cli/target/release/nexus-network start \\"
-  echo "    --node-id 36116773 \\"
-  echo "    --max-difficulty extra_large_5"
-}
-
-main() {
-  stop_running
-  overlay_files
-  build_all
-}
-
-main "$@"
-#!/usr/bin/env bash
-set -euo pipefail
-
-WORKDIR="${PWD}/nexus-build"
-SRC_OFF="${WORKDIR}/nexus-cli"
-SRC_EDT="${WORKDIR}/nexus-edited"
-
-stop_running() {
-  echo "[patch2] Çalışan nexus-network var mı kontrol ediliyor..."
-  if command -v systemctl >/dev/null 2>&1; then
-    if systemctl is-active --quiet nexus-network.service; then
-      echo "[patch2] systemd: nexus-network.service durduruluyor..."
-      sudo systemctl stop nexus-network.service || true
-      sleep 2
-    fi
-  fi
-  if pgrep -f "nexus-network" >/dev/null 2>&1; then
-    echo "[patch2] Proses: nexus-network bulunuyor, SIGTERM gönderiliyor..."
-    pkill -f "nexus-network" || true
-    for i in {1..10}; do
-      if pgrep -f "nexus-network" >/dev/null 2>&1; then
-        sleep 1
-      else
-        break
-      fi
-    done
-    if pgrep -f "nexus-network" >/dev/null 2>&1; then
-      echo "[patch2] Hâlâ çalışıyor, SIGKILL gönderiliyor..."
-      pkill -9 -f "nexus-network" || true
-    fi
-  fi
-  echo "[patch2] Node kapatma kontrolü tamam."
-}
-
-overlay_files() {
-  echo "[patch2] Klasör kontrolü..."
-  [ -d "${SRC_OFF}" ] || { echo "Resmî repo yok: ${SRC_OFF}"; exit 1; }
-  [ -d "${SRC_EDT}" ] || { echo "Editli repo yok: ${SRC_EDT}"; exit 1; }
-  chmod -R u+rwX "${SRC_OFF}"
-
-  # Editli dosya listesi — ihtiyaç oldukça güncelle
-  FILES=(
-    "clients/cli/src/workers/core.rs"
-    "clients/cli/src/main.rs"
-    "clients/cli/src/session/setup.rs"
-    "clients/cli/src/runtime.rs"
-    "clients/cli/src/workers/prover.rs"
-    "clients/cli/src/prover/pipeline.rs"
-    "clients/cli/src/workers/authenticated_worker.rs"
-    "clients/cli/src/network/request_timer.rs"
-    "clients/cli/src/workers/fetcher.rs"
-    "clients/cli/src/workers/submitter.rs"
-    # aşağıdakiler resmi repo path’leri (editli repoda yoksa otomatik atlanır)
-    "clients/cli/src/prover/handlers.rs"
-  )
-
-  echo "[patch2] Dosyalar overlay ediliyor..."
-  for f in "${FILES[@]}"; do
-    if [ -f "${SRC_EDT}/${f}" ]; then
-      mkdir -p "$(dirname "${SRC_OFF}/${f}")"
-      cp -f "${SRC_EDT}/${f}" "${SRC_OFF}/${f}"
-      echo "  + ${f}"
-    else
-      echo "  - (atlandı) ${f} editli repoda yok"
-    fi
-  done
-}
-
-auto_fix_build_errors() {
-  echo "[patch2] Otomatik düzeltmeler (gerekirse) uygulanacak..."
-
-  # 1) handlers.rs: authenticated_proving(...) -> 4. parametre ve çağrı
-  HANDLERS="${SRC_OFF}/clients/cli/src/prover/handlers.rs"
-  if [ -f "${HANDLERS}" ]; then
-    dos2unix "${HANDLERS}" >/dev/null 2>&1 || true
-
-    # Çağrı satırına , per_task_threads ekle (tek satır beklentisi; çoğu sürümde böyle)
-    if grep -q "ProvingPipeline::prove_authenticated(" "${HANDLERS}" && ! grep -q "per_task_threads" "${HANDLERS}"; then
-      sed -i 's/ProvingPipeline::prove_authenticated(\(.*\))/ProvingPipeline::prove_authenticated(\1, per_task_threads)/' "${HANDLERS}" || true
-    fi
-
-    # İmzadaki parametre listesine per_task_threads ekle (client_id paramından sonra)
-    if grep -q "pub async fn authenticated_proving" "${HANDLERS}" && ! grep -q "per_task_threads" "${HANDLERS}"; then
-      sed -i '0,/client_id[[:space:]]*:[^,)]*/s//&,\n    per_task_threads: usize/' "${HANDLERS}" || true
-    fi
-  fi
-
-  # 2) fetcher.rs: TaskDifficulty için catch-all kol ekle
-  FETCHER="${SRC_OFF}/clients/cli/src/workers/fetcher.rs"
-  if [ -f "${FETCHER}" ]; then
-    dos2unix "${FETCHER}" >/dev/null 2>&1 || true
-    if grep -q "match current" "${FETCHER}" && ! grep -q "_ => current" "${FETCHER}"; then
-      # 'match current {' satırını bul ve blok kapanmadan hemen önce bir wildcard kolu ekle
-      awk '
-        /match[[:space:]]+current[[:space:]]*\{/ {inmatch=1}
-        {print}
-        inmatch && /^\}/ {
-          print "        _ => current,"; inmatch=0
-        }
-      ' "${FETCHER}" > "${FETCHER}.tmp" && mv "${FETCHER}.tmp" "${FETCHER}"
-    fi
-  fi
-}
-
-build_all() {
-  echo "[patch2] Derleniyor..."
-  cd "${SRC_OFF}/clients/cli"
-  chmod -R u+rwX .
-  if ! cargo build --release; then
-    echo "[patch2] İlk build başarısız oldu, otomatik düzeltmeler uygulanıyor..."
-    auto_fix_build_errors
-    echo "[patch2] Yeniden derleniyor..."
-    cargo build --release
-  fi
   echo
   echo "[patch2] Tamamdır. Binary:"
   echo "  ${SRC_OFF}/clients/cli/target/release/nexus-network"
