@@ -32,28 +32,24 @@ stop_running() {
   echo "[patch2] Node kapatma kontrolü tamam."
 }
 
-overlay_files() {
+overlay_threads_only() {
   echo "[patch2] Klasör kontrolü..."
   [ -d "${SRC_OFF}" ] || { echo "Resmî repo yok: ${SRC_OFF}"; exit 1; }
   [ -d "${SRC_EDT}" ] || { echo "Editli repo yok: ${SRC_EDT}"; exit 1; }
-
   chmod -R u+rwX "${SRC_OFF}"
 
+  # SADECE thread hattına dokunan dosyalar:
   FILES=(
-    "clients/cli/src/workers/core.rs"
-    "clients/cli/src/main.rs"
-    "clients/cli/src/session/setup.rs"
-    "clients/cli/src/runtime.rs"
-    "clients/cli/src/workers/prover.rs"
-    "clients/cli/src/prover/pipeline.rs"
-    "clients/cli/src/workers/authenticated_worker.rs"
-    "clients/cli/src/network/request_timer.rs"
-    "clients/cli/src/workers/fetcher.rs"
-    "clients/cli/src/workers/submitter.rs"
-    "clients/cli/src/prover/handlers.rs"
+    "clients/cli/src/workers/core.rs"          # WorkerConfig + per_task_threads default
+    "clients/cli/src/main.rs"                  # --per-task-threads arg parse, default
+    "clients/cli/src/session/setup.rs"         # paramı zincirden geçirme
+    "clients/cli/src/runtime.rs"               # WorkerConfig.per_task_threads set
+    "clients/cli/src/workers/prover.rs"        # config -> pipeline'a aktarma
+    "clients/cli/src/prover/pipeline.rs"       # JoinSet bounded concurrency
+    "clients/cli/src/prover/handlers.rs"       # (varsa) pipeline çağrısına 4. arg
   )
 
-  echo "[patch2] Dosyalar overlay ediliyor..."
+  echo "[patch2] Dosyalar overlay ediliyor (threads only)..."
   for f in "${FILES[@]}"; do
     if [ -f "${SRC_EDT}/${f}" ]; then
       mkdir -p "$(dirname "${SRC_OFF}/${f}")"
@@ -63,66 +59,18 @@ overlay_files() {
       echo "  - (atlandı) ${f} editli repoda yok"
     fi
   done
-}
 
-auto_fix_build_errors() {
-  echo "[patch2] Otomatik düzeltmeler (gerekirse) uygulanacak..."
-
-  # 1) handlers.rs: authenticated_proving(...) => 4. parametre + çağrı
-  HANDLERS="${SRC_OFF}/clients/cli/src/prover/handlers.rs"
-  if [ -f "${HANDLERS}" ]; then
-    dos2unix "${HANDLERS}" >/dev/null 2>&1 || true
-
-    # ProvingPipeline çağrısına , per_task_threads ekle (yoksa)
-    if grep -q "ProvingPipeline::prove_authenticated(" "${HANDLERS}" && ! grep -q "per_task_threads" "${HANDLERS}"; then
-      sed -i 's/ProvingPipeline::prove_authenticated(\(.*\))/ProvingPipeline::prove_authenticated(\1, per_task_threads)/' "${HANDLERS}" || true
-    fi
-
-    # Fonksiyon imzasına per_task_threads ekle (client_id sonrasına)
-    if grep -q "pub async fn authenticated_proving" "${HANDLERS}" && ! grep -q "per_task_threads" "${HANDLERS}"; then
-      sed -i '0,/client_id[[:space:]]*:[^,)]*/s//&,\n    per_task_threads: usize/' "${HANDLERS}" || true
-    fi
-  fi
-
-  # 2) fetcher.rs: TaskDifficulty => ExtraLarge3/4/5 desteği
-  FETCHER="${SRC_OFF}/clients/cli/src/workers/fetcher.rs"
-  if [ -f "${FETCHER}" ]; then
-    dos2unix "${FETCHER}" >/dev/null 2>&1 || true
-
-    # 2.a) Bozuk FQCN varsa düzelt (crate::...::crate::... -> crate::...)
-    sed -i 's|crate::nexus_orchestrator::crate::nexus_orchestrator::|crate::nexus_orchestrator::|g' "${FETCHER}" || true
-
-    # 2.b) Import ekle (yoksa)
-    if ! grep -q '^use[[:space:]]\+crate::nexus_orchestrator::TaskDifficulty;' "${FETCHER}"; then
-      if grep -n '^use[[:space:]]' "${FETCHER}" >/dev/null 2>&1; then
-        lnnum=$(grep -n '^use[[:space:]]' "${FETCHER}" | head -1 | cut -d: -f1)
-        awk -v n="$lnnum" 'NR==n{print; print "use crate::nexus_orchestrator::TaskDifficulty;"; next}1' "${FETCHER}" > "${FETCHER}.tmp" && mv "${FETCHER}.tmp" "${FETCHER}"
-      else
-        printf '%s\n%s\n' 'use crate::nexus_orchestrator::TaskDifficulty;' "$(cat "${FETCHER}")" > "${FETCHER}.tmp" && mv "${FETCHER}.tmp" "${FETCHER}"
-      fi
-    fi
-
-    # 2.c) Tüm FQCN'leri kısa ada normalize et
-    sed -i 's|crate::nexus_orchestrator::TaskDifficulty::ExtraLarge\([2345]\)|TaskDifficulty::ExtraLarge\1|g' "${FETCHER}" || true
-
-    # 2.d) ExtraLarge2 kolunu 3/4/5 ile genişlet (eğer henüz eklenmemişse)
-    if grep -q "TaskDifficulty::ExtraLarge2" "${FETCHER}" && ! grep -q "TaskDifficulty::ExtraLarge3" "${FETCHER}"; then
-      sed -i '0,/TaskDifficulty::ExtraLarge2/s/TaskDifficulty::ExtraLarge2/TaskDifficulty::ExtraLarge2 | TaskDifficulty::ExtraLarge3 | TaskDifficulty::ExtraLarge4 | TaskDifficulty::ExtraLarge5/' "${FETCHER}" || true
-      echo "[patch2] fetcher.rs: ExtraLarge2 kolu 3/4/5 ile genişletildi."
-    fi
-  fi
+  # CRLF varsa temizle
+  for f in "${FILES[@]}"; do
+    [ -f "${SRC_OFF}/${f}" ] && dos2unix "${SRC_OFF}/${f}" >/dev/null 2>&1 || true
+  done
 }
 
 build_all() {
   echo "[patch2] Derleniyor..."
   cd "${SRC_OFF}/clients/cli"
   chmod -R u+rwX .
-  if ! cargo build --release; then
-    echo "[patch2] İlk build başarısız oldu, otomatik düzeltmeler uygulanıyor..."
-    auto_fix_build_errors
-    echo "[patch2] Yeniden derleniyor..."
-    cargo build --release
-  fi
+  cargo build --release
 
   echo
   echo "[patch2] Tamamdır. Binary:"
@@ -131,12 +79,13 @@ build_all() {
   echo "[patch2] TUI başlatma örneği:"
   echo "  ${SRC_OFF}/clients/cli/target/release/nexus-network start \\"
   echo "    --node-id 36116773 \\"
+  echo "    --per-task-threads 6 \\"
   echo "    --max-difficulty extra_large_5"
 }
 
 main() {
   stop_running
-  overlay_files
+  overlay_threads_only
   build_all
 }
 
