@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WORKDIR="${PWD}/nexus-build"
+SRC_OFF="${WORKDIR}/nexus-cli"
+SRC_EDT="${WORKDIR}/nexus-edited"
+
+stop_running() {
+  echo "[patch2] Çalışan nexus-network var mı kontrol ediliyor..."
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet nexus-network.service; then
+      echo "[patch2] systemd: nexus-network.service durduruluyor..."
+      sudo systemctl stop nexus-network.service || true
+      sleep 2
+    fi
+  fi
+  if pgrep -f "nexus-network" >/dev/null 2>&1; then
+    echo "[patch2] Proses: nexus-network bulunuyor, SIGTERM gönderiliyor..."
+    pkill -f "nexus-network" || true
+    for i in {1..10}; do
+      if pgrep -f "nexus-network" >/dev/null 2>&1; then
+        sleep 1
+      else
+        break
+      fi
+    done
+    if pgrep -f "nexus-network" >/dev/null 2>&1; then
+      echo "[patch2] Hala çalışıyor, SIGKILL gönderiliyor..."
+      pkill -9 -f "nexus-network" || true
+    fi
+  fi
+  echo "[patch2] Node kapatma kontrolü tamam."
+}
+
+overlay_and_build() {
+  echo "[patch2] Klasör kontrolü..."
+  [ -d "${SRC_OFF}" ] || { echo "Resmî repo yok: ${SRC_OFF}"; exit 1; }
+  [ -d "${SRC_EDT}" ] || { echo "Editli repo yok: ${SRC_EDT}"; exit 1; }
+
+  chmod -R u+rwX "${SRC_OFF}"
+
+  # Editli dosya listesi — ihtiyacına göre güncelle
+  FILES=(
+    "clients/cli/src/workers/core.rs"
+    "clients/cli/src/main.rs"
+    "clients/cli/src/session/setup.rs"
+    "clients/cli/src/runtime.rs"
+    "clients/cli/src/workers/prover.rs"
+    "clients/cli/src/prover/pipeline.rs"
+    "clients/cli/src/workers/authenticated_worker.rs"
+    "clients/cli/src/network/request_timer.rs"
+    "clients/cli/src/workers/fetcher.rs"
+    "clients/cli/src/workers/submitter.rs"
+  )
+
+  echo "[patch2] Dosyalar overlay ediliyor..."
+  for f in "${FILES[@]}"; do
+    if [ -f "${SRC_EDT}/${f}" ]; then
+      mkdir -p "$(dirname "${SRC_OFF}/${f}")"
+      # Yazma izni yoksa ver
+      chmod u+rw "$(dirname "${SRC_OFF}/${f}")" || true
+      # Üzerine yaz
+      cp -f "${SRC_EDT}/${f}" "${SRC_OFF}/${f}"
+      echo "  + ${f}"
+    else
+      echo "  - (atlandı) ${f} editli repoda yok"
+    fi
+  done
+
+  echo "[patch2] Derleniyor..."
+  cd "${SRC_OFF}/clients/cli"
+  # Yazma/okuma izinlerini garanti altına al
+  chmod -R u+rwX .
+  cargo build --release
+
+  echo
+  echo "[patch2] Tamamdır. Binary yolu:"
+  echo "  ${SRC_OFF}/clients/cli/target/release/nexus-network"
+  echo
+  echo "[patch2] TUI başlatma örneği:"
+  echo "  ${SRC_OFF}/clients/cli/target/release/nexus-network start \\"
+  echo "    --node-id 36116773 \\"
+  echo "    --max-difficulty extra_large_5"
+  echo
+  echo "[patch2] Not: Headless istersen --headless ekleyebilirsin; sen TUI istiyorsun."
+}
+
+main() {
+  stop_running
+  overlay_and_build
+}
+
+main "$@"
