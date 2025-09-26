@@ -7,7 +7,7 @@ WORKDIR="${PWD}/nexus-build"
 
 stop_running() {
   echo "[patch1] Çalışan nexus-network var mı kontrol ediliyor..."
-  # systemd üzerinden çalışıyorsa
+  # systemd servis olarak çalışıyorsa
   if command -v systemctl >/dev/null 2>&1; then
     if systemctl is-active --quiet nexus-network.service; then
       echo "[patch1] systemd: nexus-network.service durduruluyor..."
@@ -16,7 +16,7 @@ stop_running() {
     fi
   fi
 
-  # doğrudan process olarak çalışıyorsa
+  # doğrudan proses olarak çalışıyorsa
   if pgrep -f "nexus-network" >/dev/null 2>&1; then
     echo "[patch1] Proses: nexus-network bulunuyor, SIGTERM gönderiliyor..."
     pkill -f "nexus-network" || true
@@ -26,9 +26,9 @@ stop_running() {
       else
         break
       fi
-    end
+    done
     if pgrep -f "nexus-network" >/dev/null 2>&1; then
-      echo "[patch1] Hala çalışıyor, SIGKILL gönderiliyor..."
+      echo "[patch1] Hâlâ çalışıyor, SIGKILL gönderiliyor..."
       pkill -9 -f "nexus-network" || true
     fi
   fi
@@ -50,7 +50,6 @@ prep_env() {
 
 clean_old() {
   echo "[patch1] Eski build klasörleri temizleniyor..."
-  # Tamamen temiz kurulum istendiği için WORKDIR’i komple sil
   rm -rf "${WORKDIR}"
   mkdir -p "${WORKDIR}"
   chmod -R u+rwX "${WORKDIR}"
@@ -66,7 +65,6 @@ clone_fresh() {
   echo "[patch1] Editli repo klonlanıyor (temiz)..."
   git clone --depth 1 "${EDITED_REPO}" nexus-edited
 
-  # olası izin sorunlarına karşı yazma iznini garanti et
   chmod -R u+rwX "${WORKDIR}"
 }
 
