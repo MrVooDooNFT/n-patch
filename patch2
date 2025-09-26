@@ -39,7 +39,6 @@ overlay_files() {
 
   chmod -R u+rwX "${SRC_OFF}"
 
-  # Editli dosya listesi — gerekirse güncelle
   FILES=(
     "clients/cli/src/workers/core.rs"
     "clients/cli/src/main.rs"
@@ -51,7 +50,6 @@ overlay_files() {
     "clients/cli/src/network/request_timer.rs"
     "clients/cli/src/workers/fetcher.rs"
     "clients/cli/src/workers/submitter.rs"
-    # Resmî repoda bulunur; auto-fix için hedefte tutuyoruz:
     "clients/cli/src/prover/handlers.rs"
   )
 
@@ -70,7 +68,7 @@ overlay_files() {
 auto_fix_build_errors() {
   echo "[patch2] Otomatik düzeltmeler (gerekirse) uygulanacak..."
 
-  # 1) handlers.rs: authenticated_proving(...) => 4. parametre ve çağrı
+  # 1) handlers.rs: authenticated_proving(...) => 4. parametre + çağrı
   HANDLERS="${SRC_OFF}/clients/cli/src/prover/handlers.rs"
   if [ -f "${HANDLERS}" ]; then
     dos2unix "${HANDLERS}" >/dev/null 2>&1 || true
@@ -91,7 +89,10 @@ auto_fix_build_errors() {
   if [ -f "${FETCHER}" ]; then
     dos2unix "${FETCHER}" >/dev/null 2>&1 || true
 
-    # 2.a) Import ekle (yoksa)
+    # 2.a) Bozuk FQCN varsa düzelt (crate::...::crate::... -> crate::...)
+    sed -i 's|crate::nexus_orchestrator::crate::nexus_orchestrator::|crate::nexus_orchestrator::|g' "${FETCHER}" || true
+
+    # 2.b) Import ekle (yoksa)
     if ! grep -q '^use[[:space:]]\+crate::nexus_orchestrator::TaskDifficulty;' "${FETCHER}"; then
       if grep -n '^use[[:space:]]' "${FETCHER}" >/dev/null 2>&1; then
         lnnum=$(grep -n '^use[[:space:]]' "${FETCHER}" | head -1 | cut -d: -f1)
@@ -101,10 +102,10 @@ auto_fix_build_errors() {
       fi
     fi
 
-    # 2.b) FQCN'leri kısa ada normalize et
+    # 2.c) Tüm FQCN'leri kısa ada normalize et
     sed -i 's|crate::nexus_orchestrator::TaskDifficulty::ExtraLarge\([2345]\)|TaskDifficulty::ExtraLarge\1|g' "${FETCHER}" || true
 
-    # 2.c) ExtraLarge2 kolunu 3/4/5 ile genişlet (eğer henüz eklenmemişse)
+    # 2.d) ExtraLarge2 kolunu 3/4/5 ile genişlet (henüz eklenmediyse)
     if grep -q "TaskDifficulty::ExtraLarge2" "${FETCHER}" && ! grep -q "TaskDifficulty::ExtraLarge3" "${FETCHER}"; then
       sed -i '0,/TaskDifficulty::ExtraLarge2/s/TaskDifficulty::ExtraLarge2/TaskDifficulty::ExtraLarge2 | TaskDifficulty::ExtraLarge3 | TaskDifficulty::ExtraLarge4 | TaskDifficulty::ExtraLarge5/' "${FETCHER}" || true
       echo "[patch2] fetcher.rs: ExtraLarge2 kolu 3/4/5 ile genişletildi."
@@ -139,4 +140,4 @@ main() {
   build_all
 }
 
-main "$@" 
+main "$@"
