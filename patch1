@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OFFICIAL_REPO="https://github.com/nexus-xyz/nexus-cli.git"
+EDITED_REPO="https://github.com/MrVooDooNFT/nexus.git"
+WORKDIR="${PWD}/nexus-build"
+
+stop_running() {
+  echo "[patch1] Çalışan nexus-network var mı kontrol ediliyor..."
+  # systemd üzerinden çalışıyorsa
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet nexus-network.service; then
+      echo "[patch1] systemd: nexus-network.service durduruluyor..."
+      sudo systemctl stop nexus-network.service || true
+      sleep 2
+    fi
+  fi
+
+  # doğrudan process olarak çalışıyorsa
+  if pgrep -f "nexus-network" >/dev/null 2>&1; then
+    echo "[patch1] Proses: nexus-network bulunuyor, SIGTERM gönderiliyor..."
+    pkill -f "nexus-network" || true
+    for i in {1..10}; do
+      if pgrep -f "nexus-network" >/dev/null 2>&1; then
+        sleep 1
+      else
+        break
+      fi
+    end
+    if pgrep -f "nexus-network" >/dev/null 2>&1; then
+      echo "[patch1] Hala çalışıyor, SIGKILL gönderiliyor..."
+      pkill -9 -f "nexus-network" || true
+    fi
+  fi
+  echo "[patch1] Node kapatma kontrolü tamam."
+}
+
+prep_env() {
+  if command -v apt >/dev/null 2>&1; then
+    echo "[patch1] apt paketleri kuruluyor (sudo gerektirir)..."
+    sudo apt update -y
+    sudo apt install -y build-essential pkg-config libssl-dev git-all protobuf-compiler
+  fi
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "[patch1] Rust kuruluyor..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    export PATH="$HOME/.cargo/bin:$PATH"
+  fi
+}
+
+clean_old() {
+  echo "[patch1] Eski build klasörleri temizleniyor..."
+  # Tamamen temiz kurulum istendiği için WORKDIR’i komple sil
+  rm -rf "${WORKDIR}"
+  mkdir -p "${WORKDIR}"
+  chmod -R u+rwX "${WORKDIR}"
+  echo "[patch1] Çalışma klasörü: ${WORKDIR}"
+}
+
+clone_fresh() {
+  cd "${WORKDIR}"
+
+  echo "[patch1] Resmî repo klonlanıyor (temiz)..."
+  git clone --depth 1 "${OFFICIAL_REPO}" nexus-cli
+
+  echo "[patch1] Editli repo klonlanıyor (temiz)..."
+  git clone --depth 1 "${EDITED_REPO}" nexus-edited
+
+  # olası izin sorunlarına karşı yazma iznini garanti et
+  chmod -R u+rwX "${WORKDIR}"
+}
+
+main() {
+  stop_running
+  prep_env
+  clean_old
+  clone_fresh
+  echo "[patch1] Hazır. Şimdi 'patch2' çalıştır."
+}
+
+main "$@"
