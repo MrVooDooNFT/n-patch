@@ -1,0 +1,74 @@
+Nexus Patched Node – Hızlı Kurulum (WSL ve Linux)
+A) Gereksinimler
+
+Windows 10/11: WSL2 + Ubuntu (Microsoft Store’dan "Ubuntu" kur)
+
+Linux (Ubuntu/Debian): Normal terminal yeterli
+
+B) Kurulum (sıfırdan)
+1) Patch repo’yu çek
+rm -rf ~/n-patch ~/nexus-build
+git clone https://github.com/MrVooDooNFT/n-patch.git ~/n-patch
+cd ~/n-patch
+chmod +x patch1 patch2
+sudo apt update -y && sudo apt install -y dos2unix git build-essential pkg-config libssl-dev protobuf-compiler
+dos2unix patch1 patch2 2>/dev/null || true
+
+2) Hazırlık + temiz klon
+./patch1
+source "$HOME/.cargo/env" 2>/dev/null || true
+
+3) Thread patch’i uygula + derle
+./patch2
+
+
+→ Derleme bitince binary yolu ekrana yazılır.
+Varsayılan yol:
+~/n-patch/nexus-build/nexus-cli/clients/cli/target/release/nexus-network
+
+C) Çalıştırma (TUI, zorluk vermeden)
+~/n-patch/nexus-build/nexus-cli/clients/cli/target/release/nexus-network start --node-id --per-task-threads 8
+
+
+→ --per-task-threads değerini donanıma göre 4 ile 12 arasında deneyebilirsin.
+
+D) Güncelleme (sonraki seferler)
+cd ~/n-patch
+git pull
+chmod +x patch1 patch2
+dos2unix patch1 patch2 2>/dev/null || true
+./patch1
+source "$HOME/.cargo/env" 2>/dev/null || true
+./patch2
+
+E) Faydalı kısayol (opsiyonel)
+echo 'alias nexus="~/n-patch/nexus-build/nexus-cli/clients/cli/target/release/nexus-network"' >> ~/.bashrc
+source ~/.bashrc
+
+nexus start --node-id --per-task-threads 8
+
+F) Sorun giderme (hızlı)
+
+Binary yok / yanlış yol:
+
+find ~/n-patch/nexus-build -type f -name nexus-network 2>/dev/null
+
+
+cargo: command not found:
+
+source "$HOME/.cargo/env"
+
+
+^M bad interpreter:
+
+dos2unix patch1 patch2
+
+
+Permission denied:
+
+chmod +x patch1 patch2
+
+
+Node’u kapatmak:
+
+pkill -f "nexus-network" || true
